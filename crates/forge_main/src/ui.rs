@@ -797,12 +797,14 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                 on_update(self.api.clone(), Some(&update)).await;
                 return Ok(());
             }
-            TopLevelCommand::Setup => {
-                self.on_shell_setup(Shell::Zsh).await?;
+            TopLevelCommand::Setup { shell } => {
+                let shell = self.resolve_shell(shell);
+                self.on_shell_setup(shell).await?;
                 return Ok(());
             }
-            TopLevelCommand::Doctor => {
-                self.on_shell_doctor(Shell::Zsh).await?;
+            TopLevelCommand::Doctor { shell } => {
+                let shell = self.resolve_shell(shell);
+                self.on_shell_doctor(shell).await?;
                 return Ok(());
             }
             TopLevelCommand::Logs(args) => {
@@ -1832,6 +1834,14 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         }
 
         Ok(())
+    }
+
+    /// Resolves the shell for `forge setup` / `forge doctor`: the `--shell`
+    /// flag, else the login shell from the environment, else zsh.
+    fn resolve_shell(&self, shell: Option<Shell>) -> Shell {
+        shell
+            .or_else(|| Shell::from_shell_path(&self.api.environment().shell))
+            .unwrap_or(Shell::Zsh)
     }
 
     /// Dispatches a `forge <shell> …` subcommand for the given shell.

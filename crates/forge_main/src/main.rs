@@ -90,10 +90,21 @@ async fn run() -> Result<()> {
     // Initialize and run the UI
     let mut cli = Cli::parse();
 
-    // Check if there's piped input, but skip for `forge select` since that
-    // command uses stdin for its item list.
-    let is_select = matches!(cli.subcommands, Some(TopLevelCommand::Select(_)));
-    if !is_select && !std::io::stdin().is_terminal() {
+    // Check if there's piped input, but skip for `forge select` (stdin is its
+    // item list) and for the shell integration commands, which run from shell
+    // startup files and scripts where stdin may be a non-terminal that never
+    // reaches EOF.
+    let skip_stdin = matches!(
+        cli.subcommands,
+        Some(
+            TopLevelCommand::Select(_)
+                | TopLevelCommand::Zsh(_)
+                | TopLevelCommand::Fish(_)
+                | TopLevelCommand::Setup { .. }
+                | TopLevelCommand::Doctor { .. }
+        )
+    );
+    if !skip_stdin && !std::io::stdin().is_terminal() {
         let mut stdin_content = String::new();
         std::io::stdin().read_to_string(&mut stdin_content)?;
         let trimmed_content = stdin_content.trim();
