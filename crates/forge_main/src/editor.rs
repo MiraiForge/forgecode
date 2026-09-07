@@ -18,7 +18,7 @@ use rustyline::{
 };
 
 use super::completer::InputCompleter;
-use super::zsh::paste::wrap_pasted_text;
+use super::shell::paste::wrap_pasted_text;
 use crate::highlighter::ForgeHighlighter;
 use crate::model::ForgeCommandManager;
 use crate::prompt::ForgePrompt;

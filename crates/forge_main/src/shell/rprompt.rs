@@ -1,7 +1,8 @@
-//! ZSH right prompt implementation.
+//! Shell right prompt implementation.
 //!
-//! Provides the right prompt (RPROMPT) display for the ZSH shell integration,
-//! showing agent name, model, token count and reasoning effort information.
+//! Provides the right prompt display for the shell integrations (zsh
+//! `RPROMPT`, fish `fish_right_prompt`), showing agent name, model, token
+//! count and reasoning effort information.
 //!
 //! The reasoning effort label is rendered in one of two forms depending on
 //! the available terminal width: a three-letter abbreviation (e.g. `MED`,
@@ -15,22 +16,26 @@ use derive_setters::Setters;
 use forge_config::ForgeConfig;
 use forge_domain::{AgentId, Effort, ModelId, TokenCount};
 
-use super::style::{ZshColor, ZshStyle};
+use super::Shell;
+use super::style::{PromptColor, PromptStyle};
 use crate::utils::humanize_number;
 
-/// ZSH right prompt displaying agent, model, token count and reasoning effort.
+/// Right prompt displaying agent, model, token count and reasoning effort.
 ///
 /// Formats shell prompt information with appropriate colors:
 /// - Inactive state (no tokens): dimmed colors
 /// - Active state (has tokens): bright white/cyan/yellow colors
 ///
+/// The escape sequences used for colours depend on the target [`Shell`]:
+/// zsh prompt escapes for zsh and ANSI SGR sequences for fish.
+///
 /// The reasoning effort label adapts to the available terminal width: on
 /// narrow terminals (< [`WIDE_TERMINAL_THRESHOLD`] columns) it is rendered
 /// as a three-letter abbreviation, otherwise the full uppercase label is
-/// shown. When [`ZshRPrompt::terminal_width`] is unset the full-length form
+/// shown. When [`RPrompt::terminal_width`] is unset the full-length form
 /// is used as a safe default.
 #[derive(Setters)]
-pub struct ZshRPrompt {
+pub struct RPrompt {
     agent: Option<AgentId>,
     model: Option<ModelId>,
     token_count: Option<TokenCount>,
@@ -53,9 +58,11 @@ pub struct ZshRPrompt {
     /// Conversion ratio for cost display. Cost is multiplied by this value.
     /// Defaults to 1.0.
     conversion_ratio: f64,
+    /// Shell whose prompt escape syntax is used. Defaults to zsh.
+    shell: Shell,
 }
-impl ZshRPrompt {
-    /// Constructs a [`ZshRPrompt`] with currency settings populated from the
+impl RPrompt {
+    /// Constructs a [`RPrompt`] with currency settings populated from the
     /// provided [`ForgeConfig`].
     pub fn from_config(config: &ForgeConfig) -> Self {
         Self::default()
@@ -64,7 +71,7 @@ impl ZshRPrompt {
     }
 }
 
-impl Default for ZshRPrompt {
+impl Default for RPrompt {
     fn default() -> Self {
         Self {
             agent: None,
@@ -76,6 +83,7 @@ impl Default for ZshRPrompt {
             use_nerd_font: true,
             currency_symbol: "\u{f155}".to_string(),
             conversion_ratio: 1.0,
+            shell: Shell::Zsh,
         }
     }
 }
@@ -94,8 +102,9 @@ const MODEL_SYMBOL: &str = "\u{ec19}";
 /// and comfortable typing space once the full label is shown.
 const WIDE_TERMINAL_THRESHOLD: usize = 100;
 
-impl Display for ZshRPrompt {
+impl Display for RPrompt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let shell = self.shell;
         let active = *self.token_count.unwrap_or_default() > 0usize;
 
         // Add agent
@@ -109,9 +118,9 @@ impl Display for ZshRPrompt {
             agent_id.to_string().to_case(Case::UpperSnake)
         };
         let styled = if active {
-            agent_id.zsh().bold().fg(ZshColor::WHITE)
+            agent_id.styled(shell).bold().fg(PromptColor::WHITE)
         } else {
-            agent_id.zsh().bold().fg(ZshColor::DIMMED)
+            agent_id.styled(shell).bold().fg(PromptColor::DIMMED)
         };
         write!(f, " {}", styled)?;
 
@@ -125,7 +134,12 @@ impl Display for ZshRPrompt {
             };
 
             if active {
-                write!(f, " {}{}", prefix, num.zsh().fg(ZshColor::WHITE).bold())?;
+                write!(
+                    f,
+                    " {}{}",
+                    prefix,
+                    num.styled(shell).fg(PromptColor::WHITE).bold()
+                )?;
             }
         }
 
@@ -135,7 +149,11 @@ impl Display for ZshRPrompt {
         {
             let converted_cost = cost * self.conversion_ratio;
             let cost_str = format!("{}{:.2}", self.currency_symbol, converted_cost);
-            write!(f, " {}", cost_str.zsh().fg(ZshColor::GREEN).bold())?;
+            write!(
+                f,
+                " {}",
+                cost_str.styled(shell).fg(PromptColor::GREEN).bold()
+            )?;
         }
 
         // Add model
@@ -146,9 +164,9 @@ impl Display for ZshRPrompt {
                 model_id.to_string()
             };
             let styled = if active {
-                model_id.zsh().fg(ZshColor::CYAN)
+                model_id.styled(shell).fg(PromptColor::CYAN)
             } else {
-                model_id.zsh().fg(ZshColor::DIMMED)
+                model_id.styled(shell).fg(PromptColor::DIMMED)
             };
             write!(f, " {}", styled)?;
         }
@@ -179,9 +197,9 @@ impl Display for ZshRPrompt {
                     .to_uppercase()
             };
             let styled = if active {
-                effort_label.zsh().fg(ZshColor::YELLOW)
+                effort_label.styled(shell).fg(PromptColor::YELLOW)
             } else {
-                effort_label.zsh().fg(ZshColor::DIMMED)
+                effort_label.styled(shell).fg(PromptColor::DIMMED)
             };
             write!(f, " {}", styled)?;
         }
@@ -199,7 +217,7 @@ mod tests {
     #[test]
     fn test_rprompt_init_state() {
         // No tokens = init/dimmed state
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .to_string();
@@ -211,7 +229,7 @@ mod tests {
     #[test]
     fn test_rprompt_with_tokens() {
         // Tokens > 0 = active/bright state
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -224,7 +242,7 @@ mod tests {
     #[test]
     fn test_rprompt_with_tokens_and_cost() {
         // Tokens > 0 with cost = active/bright state with cost display
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -239,7 +257,7 @@ mod tests {
     #[test]
     fn test_rprompt_without_nerdfonts() {
         // Test with nerdfonts disabled
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -253,7 +271,7 @@ mod tests {
     #[test]
     fn test_rprompt_with_currency_conversion() {
         // Test with custom currency symbol and conversion ratio
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -268,7 +286,7 @@ mod tests {
     #[test]
     fn test_rprompt_with_eur_currency() {
         // Test with EUR currency
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -285,7 +303,7 @@ mod tests {
     fn test_rprompt_with_reasoning_effort_active() {
         // Active state (tokens > 0) renders reasoning effort in YELLOW to the
         // right of the model.
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -300,7 +318,7 @@ mod tests {
     #[test]
     fn test_rprompt_with_reasoning_effort_init_state() {
         // Inactive state (no tokens) renders reasoning effort DIMMED.
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .reasoning_effort(Some(Effort::Medium))
@@ -314,7 +332,7 @@ mod tests {
     fn test_rprompt_with_reasoning_effort_without_nerdfonts() {
         // Nerd fonts disabled: agent and model lose their glyph prefixes;
         // the reasoning effort remains as a plain uppercase color-coded label.
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -330,7 +348,7 @@ mod tests {
     fn test_rprompt_with_reasoning_effort_none_variant_is_hidden() {
         // `Effort::None` is semantically "no reasoning" and carries no display
         // value, so the rprompt suppresses it entirely.
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -344,7 +362,7 @@ mod tests {
     #[test]
     fn test_rprompt_without_reasoning_effort_is_hidden() {
         // When no reasoning effort is set, nothing is appended after the model.
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -358,7 +376,7 @@ mod tests {
     #[test]
     fn test_rprompt_with_reasoning_effort_xhigh() {
         // `Effort::XHigh` renders as the uppercase string "XHIGH".
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -374,7 +392,7 @@ mod tests {
     fn test_rprompt_reasoning_effort_narrow_terminal_uses_short_form() {
         // Below the wide-terminal threshold, the reasoning effort collapses
         // to the first three characters uppercased ("MEDIUM" -> "MED").
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -391,7 +409,7 @@ mod tests {
     fn test_rprompt_reasoning_effort_wide_terminal_uses_full_form() {
         // At or above the wide-terminal threshold, the full uppercase label
         // is rendered (e.g. "MEDIUM" rather than "MED").
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -408,7 +426,7 @@ mod tests {
     fn test_rprompt_reasoning_effort_at_threshold_is_full_form() {
         // The threshold is inclusive: a width of exactly
         // `WIDE_TERMINAL_THRESHOLD` columns renders the full label.
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -425,7 +443,7 @@ mod tests {
     fn test_rprompt_reasoning_effort_short_form_minimal() {
         // The longest variant name ("MINIMAL", 7 chars) must truncate to
         // exactly three characters ("MIN") in the compact form.
-        let actual = ZshRPrompt::default()
+        let actual = RPrompt::default()
             .agent(Some(AgentId::new("forge")))
             .model(Some(ModelId::new("gpt-4")))
             .token_count(Some(TokenCount::Actual(1500)))
@@ -435,6 +453,47 @@ mod tests {
 
         let expected =
             " %B%F{15}\u{f167a} FORGE%f%b %B%F{15}1.5k%f%b %F{134}\u{ec19} gpt-4%f %F{3}MIN%f";
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_rprompt_fish_init_state_uses_ansi_escapes() {
+        let actual = RPrompt::default()
+            .shell(Shell::Fish)
+            .agent(Some(AgentId::new("forge")))
+            .model(Some(ModelId::new("gpt-4")))
+            .to_string();
+
+        let expected = " \x1b[1m\x1b[38;5;240m\u{f167a} FORGE\x1b[39m\x1b[22m \x1b[38;5;240m\u{ec19} gpt-4\x1b[39m";
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_rprompt_fish_with_tokens_and_effort() {
+        let actual = RPrompt::default()
+            .shell(Shell::Fish)
+            .agent(Some(AgentId::new("forge")))
+            .model(Some(ModelId::new("gpt-4")))
+            .token_count(Some(TokenCount::Actual(1500)))
+            .reasoning_effort(Some(Effort::High))
+            .to_string();
+
+        let expected = " \x1b[1m\x1b[38;5;15m\u{f167a} FORGE\x1b[39m\x1b[22m \x1b[1m\x1b[38;5;15m1.5k\x1b[39m\x1b[22m \x1b[38;5;134m\u{ec19} gpt-4\x1b[39m \x1b[38;5;3mHIGH\x1b[39m";
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_rprompt_fish_output_contains_no_zsh_prompt_escapes() {
+        let actual = RPrompt::default()
+            .shell(Shell::Fish)
+            .agent(Some(AgentId::new("forge")))
+            .model(Some(ModelId::new("gpt-4")))
+            .token_count(Some(TokenCount::Actual(1500)))
+            .cost(Some(0.5))
+            .to_string();
+
+        let actual = actual.contains("%F{") || actual.contains("%B");
+        let expected = false;
         assert_eq!(actual, expected);
     }
 }

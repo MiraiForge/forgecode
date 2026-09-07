@@ -3,6 +3,8 @@ use std::{fmt, io};
 use colored::Colorize;
 use forge_tracker::VERSION;
 
+use crate::shell::Shell;
+
 const BANNER: &str = include_str!("banner");
 
 /// Renders messages into a styled box with border characters.
@@ -105,34 +107,45 @@ pub fn display(cli_mode: bool) -> io::Result<()> {
 
     println!("{banner}\n");
 
-    // Encourage zsh integration after the banner
+    // Encourage shell integration after the banner
     if !cli_mode {
-        display_zsh_encouragement();
+        display_shell_encouragement();
     }
 
     Ok(())
 }
 
-/// Encourages users to use the zsh plugin for a better experience.
-fn display_zsh_encouragement() {
-    let tip = DisplayBox::new(vec![
+/// Encourages users to use the shell plugin for a better experience.
+///
+/// The suggested setup command follows the user's login shell (`$SHELL`) and
+/// falls back to zsh when that shell has no Forge integration.
+fn display_shell_encouragement() {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .and_then(|path| Shell::from_shell_path(&path))
+        .unwrap_or(Shell::Zsh);
+
+    let mut messages = vec![
         format!(
             "{} {}",
             "TIP:".bold().yellow(),
-            "For the best experience, use our zsh plugin!".bold()
+            format!("For the best experience, use our {shell} plugin!").bold()
         ),
         format!(
             "{} {} {}",
             "·".dimmed(),
-            "Set up forge via our zsh plugin:".dimmed(),
-            "forge zsh setup".bold().green(),
+            format!("Set up forge via our {shell} plugin:").dimmed(),
+            format!("forge {shell} setup").bold().green(),
         ),
-        format!(
+    ];
+    if shell == Shell::Zsh {
+        messages.push(format!(
             "{} {} {}",
             "·".dimmed(),
             "Learn more:".dimmed(),
             "https://forgecode.dev/docs/zsh-support".cyan()
-        ),
-    ]);
+        ));
+    }
+    let tip = DisplayBox::new(messages);
     println!("{}", tip);
 }
