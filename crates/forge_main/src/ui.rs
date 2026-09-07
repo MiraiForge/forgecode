@@ -43,6 +43,7 @@ use crate::input::Console;
 use crate::model::{AppCommand, ForgeCommandManager};
 use crate::porcelain::Porcelain;
 use crate::prompt::ForgePrompt;
+use crate::shell::{RPrompt, Shell};
 use crate::state::UIState;
 use crate::stream_renderer::{SharedSpinner, StreamingWriter};
 use crate::sync_display::SyncProgressDisplay;
@@ -50,7 +51,6 @@ use crate::title_display::TitleDisplayExt;
 use crate::tools_display::format_tools;
 use crate::update::on_update;
 use crate::utils::humanize_time;
-use crate::zsh::ZshRPrompt;
 use crate::{TRACKER, banner, tracker};
 
 // File-specific constants
@@ -561,34 +561,12 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                 }
                 return Ok(());
             }
-            TopLevelCommand::Zsh(terminal_group) => {
-                match terminal_group {
-                    crate::cli::ZshCommandGroup::Plugin => {
-                        self.on_zsh_plugin().await?;
-                    }
-                    crate::cli::ZshCommandGroup::Theme => {
-                        self.on_zsh_theme().await?;
-                    }
-                    crate::cli::ZshCommandGroup::Doctor => {
-                        self.on_zsh_doctor().await?;
-                    }
-                    crate::cli::ZshCommandGroup::Rprompt => {
-                        if let Some(text) = self.handle_zsh_rprompt_command().await {
-                            print!("{}", text)
-                        }
-                        return Ok(());
-                    }
-                    crate::cli::ZshCommandGroup::Setup => {
-                        self.on_zsh_setup().await?;
-                    }
-                    crate::cli::ZshCommandGroup::Keyboard => {
-                        self.on_zsh_keyboard().await?;
-                    }
-                    crate::cli::ZshCommandGroup::Format { buffer } => {
-                        print!("{}", crate::zsh::paste::wrap_pasted_text(&buffer));
-                        return Ok(());
-                    }
-                }
+            TopLevelCommand::Zsh(group) => {
+                self.on_shell_command(Shell::Zsh, group).await?;
+                return Ok(());
+            }
+            TopLevelCommand::Fish(group) => {
+                self.on_shell_command(Shell::Fish, group).await?;
                 return Ok(());
             }
             TopLevelCommand::Mcp(mcp_command) => match mcp_command.command {
@@ -820,11 +798,11 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                 return Ok(());
             }
             TopLevelCommand::Setup => {
-                self.on_zsh_setup().await?;
+                self.on_shell_setup(Shell::Zsh).await?;
                 return Ok(());
             }
             TopLevelCommand::Doctor => {
-                self.on_zsh_doctor().await?;
+                self.on_shell_doctor(Shell::Zsh).await?;
                 return Ok(());
             }
             TopLevelCommand::Logs(args) => {
@@ -1856,38 +1834,65 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         Ok(())
     }
 
-    /// Generate ZSH plugin script
-    async fn on_zsh_plugin(&self) -> anyhow::Result<()> {
-        let plugin = crate::zsh::generate_zsh_plugin()?;
+    /// Dispatches a `forge <shell> …` subcommand for the given shell.
+    async fn on_shell_command(
+        &mut self,
+        shell: Shell,
+        group: crate::cli::ShellCommandGroup,
+    ) -> anyhow::Result<()> {
+        use crate::cli::ShellCommandGroup;
+
+        match group {
+            ShellCommandGroup::Plugin => self.on_shell_plugin(shell).await,
+            ShellCommandGroup::Theme => self.on_shell_theme(shell).await,
+            ShellCommandGroup::Doctor => self.on_shell_doctor(shell).await,
+            ShellCommandGroup::Rprompt => {
+                if let Some(text) = self.handle_rprompt_command(shell).await {
+                    print!("{}", text)
+                }
+                Ok(())
+            }
+            ShellCommandGroup::Setup => self.on_shell_setup(shell).await,
+            ShellCommandGroup::Keyboard => self.on_shell_keyboard(shell).await,
+            ShellCommandGroup::Format { buffer } => {
+                print!("{}", crate::shell::paste::wrap_pasted_text(&buffer));
+                Ok(())
+            }
+        }
+    }
+
+    /// Generate shell plugin script
+    async fn on_shell_plugin(&self, shell: Shell) -> anyhow::Result<()> {
+        let plugin = crate::shell::generate_plugin(shell)?;
         println!("{plugin}");
         Ok(())
     }
 
-    /// Generate ZSH theme
-    async fn on_zsh_theme(&self) -> anyhow::Result<()> {
-        let theme = crate::zsh::generate_zsh_theme()?;
+    /// Generate shell theme
+    async fn on_shell_theme(&self, shell: Shell) -> anyhow::Result<()> {
+        let theme = crate::shell::generate_theme(shell)?;
         println!("{theme}");
         Ok(())
     }
 
-    /// Run ZSH environment diagnostics
-    async fn on_zsh_doctor(&mut self) -> anyhow::Result<()> {
+    /// Run shell environment diagnostics
+    async fn on_shell_doctor(&mut self, shell: Shell) -> anyhow::Result<()> {
         // Stop spinner before streaming output to avoid interference
         self.spinner.stop(None)?;
 
         // Stream the diagnostic output in real-time
-        crate::zsh::run_zsh_doctor()?;
+        crate::shell::run_doctor(shell)?;
 
         Ok(())
     }
 
-    /// Show ZSH keyboard shortcuts
-    async fn on_zsh_keyboard(&mut self) -> anyhow::Result<()> {
+    /// Show shell keyboard shortcuts
+    async fn on_shell_keyboard(&mut self, shell: Shell) -> anyhow::Result<()> {
         // Stop spinner before streaming output to avoid interference
         self.spinner.stop(None)?;
 
         // Stream the keyboard shortcuts output in real-time
-        crate::zsh::run_zsh_keyboard()?;
+        crate::shell::run_keyboard(shell)?;
 
         Ok(())
     }
@@ -1921,8 +1926,9 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         Ok(())
     }
 
-    /// Setup ZSH integration by updating .zshrc
-    async fn on_zsh_setup(&mut self) -> anyhow::Result<()> {
+    /// Setup shell integration by installing the plugin and theme into the
+    /// shell configuration
+    async fn on_shell_setup(&mut self, shell: Shell) -> anyhow::Result<()> {
         // Check nerd font support
         println!();
         println!(
@@ -1953,8 +1959,9 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                 );
                 println!("   2. Configuring your terminal to use a Nerd Font");
                 println!(
-                    "   3. Removing {} from your ~/.zshrc",
-                    "NERD_FONT=0".dimmed()
+                    "   3. Removing {} from your {}",
+                    "NERD_FONT=0".dimmed(),
+                    shell.config_hint()
                 );
                 println!();
                 true
@@ -1996,9 +2003,10 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             _ => None,
         };
 
-        // Setup ZSH integration with nerd font and editor configuration
-        self.spinner.start(Some("Configuring ZSH"))?;
-        let result = crate::zsh::setup_zsh_integration(disable_nerd_font, forge_editor)?;
+        // Setup shell integration with nerd font and editor configuration
+        let configuring = format!("Configuring {}", shell.name().to_uppercase());
+        self.spinner.start(Some(configuring.as_str()))?;
+        let result = crate::shell::setup_integration(shell, disable_nerd_font, forge_editor)?;
         self.spinner.stop(None)?;
 
         // Log backup creation if one was made
@@ -2011,14 +2019,15 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
         self.writeln_title(TitleFormat::info(result.message))?;
 
-        self.writeln_title(TitleFormat::debug("running forge zsh doctor"))?;
+        self.writeln_title(TitleFormat::debug(format!("running forge {shell} doctor")))?;
         println!();
-        let doctor_result = self.on_zsh_doctor().await;
+        let doctor_result = self.on_shell_doctor(shell).await;
 
         if doctor_result.is_ok() {
-            self.writeln_title(TitleFormat::action(
-                "run `exec zsh` now (or open a new terminal window) to load the updated shell config",
-            ))?;
+            self.writeln_title(TitleFormat::action(format!(
+                "run `{}` now (or open a new terminal window) to load the updated shell config",
+                shell.reload_hint()
+            )))?;
             self.writeln_title(TitleFormat::action(
                 "run `: Hi` after restarting your shell to confirm everything works",
             ))?;
@@ -4590,7 +4599,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
     /// Handle prompt command - returns model and conversation stats for shell
     /// integration
-    async fn handle_zsh_rprompt_command(&mut self) -> Option<String> {
+    async fn handle_rprompt_command(&mut self, shell: Shell) -> Option<String> {
         let cid = std::env::var("_FORGE_CONVERSATION_ID")
             .ok()
             .filter(|text| !text.trim().is_empty())
@@ -4632,7 +4641,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             .map(|val| val == "1")
             .unwrap_or(true); // Default to true
 
-        // Read terminal width from COLUMNS (propagated by the zsh shell plugin)
+        // Read terminal width from COLUMNS (propagated by the shell plugin)
         // so the rprompt can pick a compact or full-length reasoning effort
         // label. Missing or unparseable values fall back to the full-length
         // form in the renderer.
@@ -4640,7 +4649,8 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             .ok()
             .and_then(|s| s.parse::<usize>().ok());
 
-        let rprompt = ZshRPrompt::from_config(&self.config)
+        let rprompt = RPrompt::from_config(&self.config)
+            .shell(shell)
             .agent(agent_id)
             .model(model_id)
             .token_count(conversation.and_then(|conversation| conversation.token_count()))

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use clap::error::ErrorKind;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use forge_api::{AgentInfo, Model, Template};
 use forge_domain::UserCommand;
 use strum::{EnumProperty, IntoEnumIterator};
@@ -781,6 +781,45 @@ impl AppCommand {
             AppCommand::Forge | AppCommand::Muse | AppCommand::Sage
         )
     }
+}
+
+/// Returns `(name, usage)` pairs for every public built-in command, including
+/// clap aliases, for generating shell plugin stubs.
+///
+/// Internal variants (messages, custom commands, shell escapes) are skipped.
+/// The `ask` alias for the `sage` agent is included because the shell plugins
+/// resolve it before dispatch.
+pub fn shell_command_names() -> Vec<(String, String)> {
+    let cmd = ClapCmd::command();
+    let public: Vec<AppCommand> = AppCommand::iter()
+        .filter(|command| !command.is_internal())
+        .collect();
+    let mut names = Vec::new();
+
+    for sub in cmd.get_subcommands() {
+        let mut candidates: Vec<&str> = vec![sub.get_name()];
+        candidates.extend(sub.get_all_aliases());
+
+        let Some(usage) = public
+            .iter()
+            .find(|command| candidates.contains(&command.name()))
+            .map(|command| command.usage().to_string())
+        else {
+            continue;
+        };
+
+        for candidate in candidates {
+            names.push((candidate.to_string(), usage.clone()));
+        }
+    }
+
+    names.push((
+        "ask".to_string(),
+        "Research and investigation agent [alias for: sage]".to_string(),
+    ));
+    names.sort();
+    names.dedup();
+    names
 }
 
 #[cfg(test)]
@@ -1679,5 +1718,22 @@ mod tests {
             result,
             AppCommand::Suggest { description: vec!["-v".to_string(), "file.txt".to_string()] }
         );
+    }
+
+    #[test]
+    fn test_shell_command_names_includes_aliases_and_ask() {
+        let fixture = shell_command_names();
+        let names: Vec<&str> = fixture.iter().map(|(name, _)| name.as_str()).collect();
+
+        let actual = names.contains(&"conversation")
+            && names.contains(&"c")
+            && names.contains(&"commit-preview")
+            && names.contains(&"act")
+            && names.contains(&"forge")
+            && names.contains(&"ask")
+            && !names.contains(&"message")
+            && !names.contains(&"!shell");
+        let expected = true;
+        assert_eq!(actual, expected);
     }
 }

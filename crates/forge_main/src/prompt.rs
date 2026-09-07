@@ -21,7 +21,7 @@ const MODEL_SYMBOL: &str = "\u{ec19}";
 
 /// Terminal width at which the reasoning effort label switches from the
 /// compact three-letter form (e.g. `MED`) to the full uppercase label
-/// (e.g. `MEDIUM`). Matches [`crate::zsh::rprompt`] so the CLI and zsh
+/// (e.g. `MEDIUM`). Matches [`crate::shell::rprompt`] so the CLI and shell
 /// integration render identically on equivalent terminals.
 const WIDE_TERMINAL_THRESHOLD: usize = 100;
 
@@ -184,7 +184,7 @@ impl ForgePrompt {
         }
 
         // Reasoning effort — rendered to the right of the model, matching the
-        // ZSH rprompt. `Effort::None` is suppressed (see zsh/rprompt.rs). On
+        // ZSH rprompt. `Effort::None` is suppressed (see shell/rprompt.rs). On
         // narrow terminals the label collapses to its first three characters
         // so the prompt stays compact.
         if let Some(ref effort) = self.reasoning_effort

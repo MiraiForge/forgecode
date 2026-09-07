@@ -1,7 +1,8 @@
+//! Zsh shell integration: plugin/theme generation, diagnostics and `.zshrc`
+//! installation.
+
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::Stdio;
 
 use anyhow::{Context, Result};
 use clap::CommandFactory;
@@ -9,6 +10,8 @@ use clap_complete::generate;
 use clap_complete::shells::Zsh;
 use include_dir::{Dir, include_dir};
 
+use super::setup::{MarkerState, ShellSetupResult, backup_file, parse_markers, run_script};
+use super::{Shell, normalize_script, strip_comments};
 use crate::cli::Cli;
 
 /// Embeds shell plugin files for zsh integration
@@ -22,15 +25,8 @@ pub fn generate_zsh_plugin() -> Result<String> {
     // Iterate through all embedded files in shell-plugin/lib, stripping comments
     // and empty lines. All files in this directory are .zsh files.
     for file in forge_embed::files(&ZSH_PLUGIN_LIB) {
-        let content = super::normalize_script(std::str::from_utf8(file.contents())?);
-        for line in content.lines() {
-            let trimmed = line.trim();
-            // Skip empty lines and comment lines
-            if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                output.push_str(line);
-                output.push('\n');
-            }
-        }
+        let content = normalize_script(std::str::from_utf8(file.contents())?);
+        output.push_str(&strip_comments(&content));
     }
 
     // Generate clap completions for the CLI
@@ -51,125 +47,12 @@ pub fn generate_zsh_plugin() -> Result<String> {
 
 /// Generates the ZSH theme for Forge
 pub fn generate_zsh_theme() -> Result<String> {
-    let mut content =
-        super::normalize_script(include_str!("../../../../shell-plugin/forge.theme.zsh"));
+    let mut content = normalize_script(include_str!("../../../../shell-plugin/forge.theme.zsh"));
 
     // Set environment variable to indicate theme is loaded (with timestamp)
     content.push_str("\n_FORGE_THEME_LOADED=$(date +%s)\n");
 
     Ok(content)
-}
-
-/// Creates a temporary zsh script file for Windows execution
-fn create_temp_zsh_script(script_content: &str) -> Result<(tempfile::TempDir, PathBuf)> {
-    use std::io::Write;
-
-    let temp_dir = tempfile::tempdir().context("Failed to create temp directory")?;
-    let script_path = temp_dir.path().join("forge_script.zsh");
-    let mut file = fs::File::create(&script_path).context("Failed to create temp script file")?;
-    file.write_all(script_content.as_bytes())
-        .context("Failed to write temp script")?;
-
-    Ok((temp_dir, script_path))
-}
-
-/// Executes a ZSH script with streaming output
-///
-/// # Arguments
-///
-/// * `script_content` - The ZSH script content to execute
-/// * `script_name` - Descriptive name for the script (used in error messages)
-///
-/// # Errors
-///
-/// Returns error if the script cannot be executed, if output streaming fails,
-/// or if the script exits with a non-zero status code
-fn execute_zsh_script_with_streaming(script_content: &str, script_name: &str) -> Result<()> {
-    let script_content = super::normalize_script(script_content);
-
-    // On Unix, pass the script via `zsh -c`. Command::arg() uses execve,
-    // which forwards arguments directly without shell interpretation, so
-    // embedded quotes are safe.
-    //
-    // On Windows, we write the script to a temp file and run `zsh -f <file>`
-    // instead. A temp file is necessary because:
-    //   1. CI has core.autocrlf=true, so checked-out files contain CRLF; writing
-    //      through normalize_script ensures the temp file has LF.
-    //   2. CreateProcess mangles quotes, so passing the script via -c corrupts any
-    //      embedded quoting.
-    //   3. Piping via stdin is unreliable -- Windows caps pipe buffer size, which
-    //      can truncate or block on larger scripts.
-    // The -f flag also prevents ~/.zshrc from loading during execution.
-    let (_temp_dir, mut child) = if cfg!(windows) {
-        let (temp_dir, script_path) = create_temp_zsh_script(&script_content)?;
-        let child = std::process::Command::new("zsh")
-            // -f: don't load ~/.zshrc (prevents theme loading during doctor)
-            .arg("-f")
-            .arg(script_path.to_string_lossy().as_ref())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context(format!("Failed to execute zsh {} script", script_name))?;
-        // Keep temp_dir alive by boxing it in the tuple
-        (Some(temp_dir), child)
-    } else {
-        let child = std::process::Command::new("zsh")
-            .arg("-c")
-            .arg(&script_content)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context(format!("Failed to execute zsh {} script", script_name))?;
-        (None, child)
-    };
-
-    // Get stdout and stderr handles
-    let stdout = child.stdout.take().context("Failed to capture stdout")?;
-    let stderr = child.stderr.take().context("Failed to capture stderr")?;
-
-    // Use scoped threads for safer streaming with automatic joining
-    std::thread::scope(|s| {
-        // Stream stdout line by line
-        s.spawn(|| {
-            let stdout_reader = BufReader::new(stdout);
-            for line in stdout_reader.lines() {
-                match line {
-                    Ok(line) => println!("{}", line),
-                    Err(e) => eprintln!("Error reading stdout: {}", e),
-                }
-            }
-        });
-
-        // Stream stderr line by line
-        s.spawn(|| {
-            let stderr_reader = BufReader::new(stderr);
-            for line in stderr_reader.lines() {
-                match line {
-                    Ok(line) => eprintln!("{}", line),
-                    Err(e) => eprintln!("Error reading stderr: {}", e),
-                }
-            }
-        });
-    });
-
-    // Wait for the child process to complete
-    let status = child
-        .wait()
-        .context(format!("Failed to wait for zsh {} script", script_name))?;
-
-    if !status.success() {
-        let exit_code = status
-            .code()
-            .map_or_else(|| "unknown".to_string(), |code| code.to_string());
-
-        anyhow::bail!(
-            "ZSH {} script failed with exit code: {}",
-            script_name,
-            exit_code
-        );
-    }
-
-    Ok(())
 }
 
 /// Runs diagnostics on the ZSH shell environment with streaming output
@@ -179,7 +62,7 @@ fn execute_zsh_script_with_streaming(script_content: &str, script_name: &str) ->
 /// Returns error if the doctor script cannot be executed
 pub fn run_zsh_doctor() -> Result<()> {
     let script_content = include_str!("../../../../shell-plugin/doctor.zsh");
-    execute_zsh_script_with_streaming(script_content, "doctor")
+    run_script(Shell::Zsh, script_content, "doctor")
 }
 
 /// Shows ZSH keyboard shortcuts with streaming output
@@ -189,47 +72,7 @@ pub fn run_zsh_doctor() -> Result<()> {
 /// Returns error if the keyboard script cannot be executed
 pub fn run_zsh_keyboard() -> Result<()> {
     let script_content = include_str!("../../../../shell-plugin/keyboard.zsh");
-    execute_zsh_script_with_streaming(script_content, "keyboard")
-}
-
-/// Represents the state of markers in a file
-enum MarkerState {
-    /// No markers found
-    NotFound,
-    /// Valid markers with correct positions
-    Valid { start: usize, end: usize },
-    /// Invalid markers (incorrect order or incomplete)
-    Invalid {
-        start: Option<usize>,
-        end: Option<usize>,
-    },
-}
-
-/// Parses the file content to find and validate marker positions
-///
-/// # Arguments
-///
-/// * `lines` - The lines of the file to parse
-/// * `start_marker` - The start marker to look for
-/// * `end_marker` - The end marker to look for
-fn parse_markers(lines: &[String], start_marker: &str, end_marker: &str) -> MarkerState {
-    let start_idx = lines.iter().position(|line| line.trim() == start_marker);
-    let end_idx = lines.iter().position(|line| line.trim() == end_marker);
-
-    match (start_idx, end_idx) {
-        (Some(start), Some(end)) if start < end => MarkerState::Valid { start, end },
-        (None, None) => MarkerState::NotFound,
-        (start, end) => MarkerState::Invalid { start, end },
-    }
-}
-
-/// Result of ZSH setup operation
-#[derive(Debug)]
-pub struct ZshSetupResult {
-    /// Status message describing what was done
-    pub message: String,
-    /// Path to backup file if one was created
-    pub backup_path: Option<PathBuf>,
+    run_script(Shell::Zsh, script_content, "keyboard")
 }
 
 /// Sets up ZSH integration with optional nerd font and editor configuration
@@ -249,11 +92,11 @@ pub struct ZshSetupResult {
 pub fn setup_zsh_integration(
     disable_nerd_font: bool,
     forge_editor: Option<&str>,
-) -> Result<ZshSetupResult> {
+) -> Result<ShellSetupResult> {
     const START_MARKER: &str = "# >>> forge initialize >>>";
     const END_MARKER: &str = "# <<< forge initialize <<<";
     const FORGE_INIT_CONFIG_RAW: &str = include_str!("../../../../shell-plugin/forge.setup.zsh");
-    let forge_init_config = super::normalize_script(FORGE_INIT_CONFIG_RAW);
+    let forge_init_config = normalize_script(FORGE_INIT_CONFIG_RAW);
 
     let home = std::env::var("HOME").context("HOME environment variable not set")?;
     let zdotdir = std::env::var("ZDOTDIR").unwrap_or_else(|_| home.clone());
@@ -333,24 +176,7 @@ pub fn setup_zsh_integration(
 
     // Create backup of existing .zshrc if it exists
     let backup_path = if zshrc_path.exists() {
-        // Generate timestamp for backup filename
-        let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
-
-        // Safe to unwrap: zshrc_path was constructed from a valid HOME/ZDOTDIR path
-        let parent = zshrc_path
-            .parent()
-            .context("zshrc path has no parent directory")?;
-        let filename = zshrc_path
-            .file_name()
-            .context("zshrc path has no filename")?;
-        let filename_str = filename
-            .to_str()
-            .context("zshrc filename is not valid UTF-8")?;
-
-        let backup = parent.join(format!("{}.bak.{}", filename_str, timestamp));
-        fs::copy(&zshrc_path, &backup)
-            .context(format!("Failed to create backup at {}", backup.display()))?;
-        Some(backup)
+        Some(backup_file(&zshrc_path)?)
     } else {
         None
     };
@@ -359,7 +185,7 @@ pub fn setup_zsh_integration(
     fs::write(&zshrc_path, &new_content)
         .context(format!("Failed to write to {}", zshrc_path.display()))?;
 
-    Ok(ZshSetupResult {
+    Ok(ShellSetupResult {
         message: format!("forge plugins {}", config_action),
         backup_path,
     })

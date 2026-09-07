@@ -14,6 +14,7 @@ mod oauth_callback;
 mod porcelain;
 mod prompt;
 mod sandbox;
+mod shell;
 mod state;
 mod stream_renderer;
 mod sync_display;
@@ -23,7 +24,6 @@ pub mod tracker;
 mod ui;
 mod utils;
 mod vscode;
-mod zsh;
 
 mod update;
 
