@@ -284,6 +284,20 @@ mod tests {
     }
 
     #[test]
+    fn test_generated_plugin_binds_enter_and_tab_widgets() {
+        let fixture = generate_fish_plugin().unwrap();
+
+        let actual = fixture.contains("function __forge_accept_line")
+            && fixture.contains("function __forge_complete")
+            && fixture.contains("bind -M $mode enter __forge_accept_line")
+            && fixture.contains("bind -M $mode tab __forge_complete")
+            && fixture.contains("bind -M $mode \\r __forge_accept_line")
+            && fixture.contains("function __forge_context_postexec --on-event fish_postexec");
+        let expected = true;
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn test_generated_plugin_has_no_comment_lines_before_completions() {
         let fixture = generate_fish_plugin().unwrap();
         let body = fixture.split("# --- Command stubs ---").next().unwrap();
