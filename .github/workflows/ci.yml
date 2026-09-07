@@ -72,6 +72,46 @@ jobs:
         toolchain: stable
     - name: Run performance benchmark
       run: './scripts/benchmark.sh --threshold 60 zsh rprompt'
+  fish_rprompt_perf:
+    name: 'Performance: fish rprompt'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Protobuf Compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Setup Rust Toolchain
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+    - name: Run performance benchmark
+      run: './scripts/benchmark.sh --threshold 60 fish rprompt'
+  fish_plugin:
+    name: Fish plugin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Protobuf Compiler
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Setup Rust Toolchain
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+    - name: Install fish 4
+      run: sudo apt-add-repository -y ppa:fish-shell/release-4 && sudo apt-get update && sudo apt-get install -y fish && fish --version
+    - name: Build forge
+      run: cargo build -p forge_main
+    - name: Test fish plugin
+      run: './scripts/test-fish-plugin.sh'
   draft_release:
     needs:
     - build
