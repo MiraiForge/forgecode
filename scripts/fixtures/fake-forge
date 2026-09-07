@@ -1,0 +1,57 @@
+#!/bin/sh
+# Fake `forge` binary for the fish plugin smoke test (scripts/test-fish-plugin.py).
+#
+# Logs every invocation (argv plus the session/context environment variables
+# the plugin is expected to pass) to $FAKE_FORGE_LOG and prints canned output
+# so the plugin can be driven without credentials or network access.
+LOG="${FAKE_FORGE_LOG:-/tmp/fake-forge.log}"
+{
+  printf 'ARGV:'; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'
+  for v in FORGE_SESSION__MODEL_ID FORGE_SESSION__PROVIDER_ID FORGE_REASONING__EFFORT \
+           _FORGE_TERM_COMMANDS _FORGE_TERM_EXIT_CODES _FORGE_TERM_TIMESTAMPS \
+           _FORGE_CONVERSATION_ID _FORGE_ACTIVE_AGENT COLUMNS; do
+    eval "val=\${$v-__unset__}"
+    [ "$val" != "__unset__" ] && printf 'ENV %s=%s\n' "$v" "$(printf '%s' "$val" | tr '\037\n' '|~')"
+  done
+} >> "$LOG"
+
+AGENT=""
+if [ "$1" = "--agent" ]; then AGENT="$2"; shift 2; fi
+case "$1 $2 $3" in
+  "list commands --porcelain")
+    printf 'COMMAND TYPE DESCRIPTION\nnew COMMAND Start new conversation\nsage AGENT Research agent\nmuse AGENT Planning agent\nforge AGENT Implementation agent\nask AGENT alias\nmycmd CUSTOM A custom command\n'; exit 0;;
+  "list agents --porcelain")
+    printf 'ID TITLE\nforge Implementation\nsage Research\nmuse Planning\n'; exit 0;;
+  "conversation new "*|"conversation new")
+    echo "11111111-2222-3333-4444-555555555555"; exit 0;;
+  "conversation clone "*)
+    echo "Cloned conversation into aaaaaaaa-bbbb-cccc-dddd-ffffffffffff"; exit 0;;
+  "select file "*|"select file")
+    echo "src/main.rs"; exit 0;;
+  "select command "*|"select command")
+    echo "sage"; exit 0;;
+  "select agent "*|"select agent")
+    echo "muse"; exit 0;;
+  "select model "*|"select model")
+    printf 'gpt-9\nopenai\n'; exit 0;;
+  "select reasoning-effort "*|"select reasoning-effort")
+    echo "high"; exit 0;;
+  "select provider "*|"select provider")
+    echo "openai"; exit 0;;
+  "select conversation "*|"select conversation")
+    echo "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"; exit 0;;
+  "fish rprompt "*|"fish rprompt")
+    printf ' RP[%s]' "${_FORGE_ACTIVE_AGENT:-none}"; exit 0;;
+  "suggest "*)
+    echo "ls -la"; exit 0;;
+  "commit --preview"*|"commit --max-diff"*)
+    echo "feat: fake commit message"; exit 0;;
+  "cmd execute "*)
+    echo "CUSTOM-EXECUTED"; exit 0;;
+  "workspace info "*)
+    exit 1;;
+  "-p "*)
+    echo "PROMPT-SENT: $2 (agent=$AGENT)"; exit 0;;
+  *)
+    echo "FAKE-FORGE: $*"; exit 0;;
+esac

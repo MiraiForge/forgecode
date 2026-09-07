@@ -21,8 +21,9 @@
 - [How Forge Works: Three Modes](#how-forge-works-three-modes)
   - [Interactive Mode (TUI)](#interactive-mode-tui)
   - [One-Shot CLI Mode](#one-shot-cli-mode)
-  - [ZSH Plugin Mode (`:` prefix)](#zsh-plugin-mode--prefix)
-- [ZSH Plugin: The `:` Prefix System](#zsh-plugin-the--prefix-system)
+  - [Shell Plugin Mode (`:` prefix)](#shell-plugin-mode--prefix)
+- [Shell Plugin: The `:` Prefix System](#shell-plugin-the--prefix-system)
+  - [Supported Shells](#supported-shells)
   - [Agents](#agents)
   - [Sending Prompts](#sending-prompts)
   - [Attaching Files](#attaching-files)
@@ -211,9 +212,9 @@ forge suggest "find large log files" # Translate natural language to a shell com
 
 > **Note:** `forge conversation resume <id>` opens the interactive TUI. It does **not** just print a message and exit. If you run it and see the cursor waiting, you are inside the interactive session. Type your prompt or press `Ctrl+C` to exit.
 
-### ZSH Plugin Mode (`:` prefix)
+### Shell Plugin Mode (`:` prefix)
 
-Install the ZSH plugin once with `forge setup`, then use `:` commands directly at your shell prompt without ever typing `forge`. This is the fastest mode for day-to-day development: send prompts, switch conversations, commit, and suggest commands without leaving your shell.
+Install the shell plugin once with `forge setup` (zsh or fish), then use `:` commands directly at your shell prompt without ever typing `forge`. This is the fastest mode for day-to-day development: send prompts, switch conversations, commit, and suggest commands without leaving your shell.
 
 ```zsh
 : refactor the auth module      # Send a prompt to the active agent
@@ -222,15 +223,31 @@ Install the ZSH plugin once with `forge setup`, then use `:` commands directly a
 :conversation                   # Browse saved conversations with interactive picker
 ```
 
-See the full [ZSH Plugin reference below](#zsh-plugin-the--prefix-system) for all commands and aliases.
+See the full [Shell Plugin reference below](#shell-plugin-the--prefix-system) for all commands and aliases.
 
 ---
 
-## ZSH Plugin: The `:` Prefix System
+## Shell Plugin: The `:` Prefix System
 
-When you install the ZSH plugin (`forge setup`), you get a `:` prefix command system at your shell prompt. This is the fastest way to use Forge during normal development; you never leave your shell.
+When you install the shell plugin (`forge setup`), you get a `:` prefix command system at your shell prompt. This is the fastest way to use Forge during normal development; you never leave your shell.
 
 **How it works:** Lines starting with `:` are intercepted before the shell sees them and routed to Forge. Everything else runs normally.
+
+### Supported Shells
+
+| Shell | Install | Config written | Diagnostics |
+|---|---|---|---|
+| zsh | `forge setup` or `forge zsh setup` | `~/.zshrc` (managed block) | `forge zsh doctor`, `forge zsh keyboard` |
+| fish | `forge setup` or `forge fish setup` | `~/.config/fish/conf.d/forge.fish` | `forge fish doctor`, `forge fish keyboard` |
+
+`forge setup` and `forge doctor` follow your login shell (`$SHELL`); pass `--shell zsh` or `--shell fish` to choose explicitly. The `:` commands, pickers, session state and right prompt behave the same in both shells.
+
+Fish notes:
+
+- fish 4.0 or newer is recommended. On fish 3.x, `:` lines are not recorded in history and no OSC 133 prompt markers are emitted for them.
+- Autosuggestions and syntax highlighting are built into fish, so no extra plugins are installed.
+- Paths dropped into the terminal are wrapped in `@[…]` when you press Enter or Tab (fish does not expose a paste hook).
+- An existing `fish_right_prompt` (Tide, Starship, your own) is kept; Forge's segment is shown before it.
 
 ```zsh
 : <prompt>         # Send a prompt to the active agent
@@ -477,7 +494,8 @@ forge info                               # Show config, active model, environmen
 forge list tool --agent <id>             # List tools for a specific agent
 forge doctor                             # Run shell environment diagnostics
 forge update                             # Update forge to the latest version
-forge setup                              # Install ZSH plugin (updates .zshrc)
+forge setup                              # Install the shell plugin for your login shell (zsh: .zshrc, fish: conf.d)
+forge setup --shell fish                 # Install the fish plugin explicitly (or: forge fish setup)
 ```
 
 ## Advanced Configuration
@@ -861,33 +879,33 @@ FORGE_DEBUG_REQUESTS=/path/to/debug/requests.json  # Write debug HTTP request fi
 </details>
 
 <details>
-<summary><strong>ZSH Plugin Configuration</strong></summary>
+<summary><strong>Shell Plugin Configuration</strong></summary>
 
-Configure the ZSH plugin behavior:
+Configure the zsh and fish plugin behavior:
 
 ```bash
 # .env
 FORGE_BIN=forge                    # Command to use for forge operations (default: "forge")
 ```
 
-The `FORGE_BIN` environment variable allows you to customize the command used by the ZSH plugin when transforming `:` prefixed commands. If not set, it defaults to `"forge"`.
+The `FORGE_BIN` environment variable allows you to customize the command used by the shell plugins when transforming `:` prefixed commands. If not set, it defaults to `"forge"`.
 
 </details>
 
 <details>
 <summary><strong>Display Configuration</strong></summary>
 
-Configure display options for the Forge UI and ZSH theme:
+Configure display options for the Forge UI and the shell theme (zsh `RPROMPT`, fish right prompt):
 
 ```bash
 # .env
-FORGE_CURRENCY_SYMBOL="$"         # Currency symbol for cost display in ZSH theme (default: "$")
+FORGE_CURRENCY_SYMBOL="$"         # Currency symbol for cost display in the shell theme (default: "$")
 FORGE_CURRENCY_CONVERSION_RATE=1.0  # Conversion rate for currency display (default: 1.0)
-NERD_FONT=1                       # Enable Nerd Font icons in ZSH theme (default: auto-detected, set to "1" or "true" to enable, "0" or "false" to disable)
+NERD_FONT=1                       # Enable Nerd Font icons in the shell theme (default: auto-detected, set to "1" or "true" to enable, "0" or "false" to disable)
 USE_NERD_FONT=1                   # Alternative variable for enabling Nerd Font icons (same behavior as NERD_FONT)
 ```
 
-The `FORGE_CURRENCY_SYMBOL` and `FORGE_CURRENCY_CONVERSION_RATE` variables control how costs are displayed in the ZSH theme right prompt. Use these to customize the currency display for your region or preferred currency.
+The `FORGE_CURRENCY_SYMBOL` and `FORGE_CURRENCY_CONVERSION_RATE` variables control how costs are displayed in the shell theme right prompt. Use these to customize the currency display for your region or preferred currency.
 
 </details>
 

@@ -1,6 +1,6 @@
-# Forge ZSH Plugin
+# Forge Shell Plugin (zsh and fish)
 
-A powerful ZSH plugin that provides intelligent command transformation, file tagging, and conversation management for the Forge AI assistant.
+A powerful shell plugin that provides intelligent command transformation, file tagging, and conversation management for the Forge AI assistant. The zsh plugin lives in this directory; the fish port lives in `fish/` and mirrors it command for command.
 
 ## Features
 
@@ -11,12 +11,33 @@ A powerful ZSH plugin that provides intelligent command transformation, file tag
 - **Conversation Continuity**: Automatic session management across commands
 - **Interactive Completion**: Fuzzy finding for files and agents via built-in picker
 
+## Layout
+
+| Shell | Entry point | Modules | Installed by |
+|---|---|---|---|
+| zsh | `forge.plugin.zsh` | `lib/*.zsh`, `lib/actions/*.zsh` | `forge zsh setup` → managed block in `~/.zshrc` |
+| fish | `fish/forge.plugin.fish` | `fish/lib/*.fish`, `fish/lib/actions/*.fish` | `forge fish setup` → `~/.config/fish/conf.d/forge.fish` |
+
+`forge <shell> plugin` embeds the `lib/` tree at build time, strips comments, appends completions (and, for fish, `:command` stub functions) and is what the installed config sources. The entry points source the same files from a checkout for development.
+
+Both plugins talk to Forge through the same contract: the active agent goes on `--agent`, the conversation on `--cid`, session overrides in `FORGE_SESSION__MODEL_ID` / `FORGE_SESSION__PROVIDER_ID` / `FORGE_REASONING__EFFORT`, and the recent-command ring buffer in `_FORGE_TERM_COMMANDS` / `_FORGE_TERM_EXIT_CODES` / `_FORGE_TERM_TIMESTAMPS` (`\x1F`-separated).
+
+### Fish specifics
+
+- **Enter and Tab** are bound at the user level (`enter`, `ctrl-j`, `ctrl-m`, `ctrl-enter`, `tab` on fish 4; `\r`, `\n`, `\t` on 3.x) in the `default` and `insert` modes, so they survive `fish_vi_key_bindings`.
+- **fish 4.0+** is recommended: `:` lines are recorded with `history append` and wrapped in OSC 133 markers only there.
+- **Highlighting** comes from fish itself; the generated plugin defines `:` and `:<command>` stub functions so `:` lines are coloured as valid commands. The stubs also dispatch when a `:` line is executed outside the Enter binding.
+- **Drag-and-drop paths** are wrapped in `@[…]` when Enter or Tab is pressed (fish has no paste hook).
+- **Right prompt**: `forge fish theme` wraps an existing `fish_right_prompt` at the first prompt and prepends Forge's segment.
+- **Diagnostics**: `forge fish doctor`, `forge fish keyboard`; tests: `./scripts/test-fish-plugin.sh`.
+
 ## Prerequisites
 
 Before using this plugin, ensure you have the following tools installed:
 
 - **fd** - Fast file finder (alternative to find)
 - **forge** - The Forge CLI tool
+- **zsh 5.0+** or **fish 4.0+** (fish 3.x works with reduced history/OSC 133 support)
 
 ### Installation of Prerequisites
 
@@ -241,7 +262,7 @@ This will index the current directory for semantic code search.
 Run comprehensive environment diagnostics to check your Forge setup:
 
 ```bash
-:doctor
+forge zsh doctor   # or: forge fish doctor, or plain `forge doctor` for your login shell
 ```
 
 This will check:
@@ -264,7 +285,7 @@ The plugin creates a `.forge` directory in your current working directory (simil
 
 ### Command History
 
-All transformed commands are properly saved to ZSH history, allowing you to:
+All transformed commands are properly saved to shell history (zsh, and fish 4.0+), allowing you to:
 - Navigate command history with arrow keys
 - Search previous forge commands with `Ctrl+R`
 - Reuse complex commands with file tags
