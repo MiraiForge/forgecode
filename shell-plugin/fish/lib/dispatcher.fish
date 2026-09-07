@@ -92,6 +92,77 @@ function __forge_dispatch
     end
 
     switch $user_action
+        case new n
+            __forge_action_new "$input_text"
+        case info i
+            __forge_action_info
+        case dump d
+            __forge_action_dump "$input_text"
+        case compact
+            __forge_action_compact
+        case retry r
+            __forge_action_retry
+        case help
+            __forge_action_help
+        case agent a
+            __forge_action_agent "$input_text"
+        case conversation c
+            __forge_action_conversation "$input_text"
+        case conversation-tree ct
+            __forge_action_conversation_tree
+        case config-model cm
+            __forge_action_model "$input_text"
+        case model m
+            __forge_action_session_model "$input_text"
+        case config-reload cr model-reset mr
+            __forge_action_config_reload
+        case reasoning-effort re
+            __forge_action_reasoning_effort "$input_text"
+        case config-reasoning-effort cre
+            __forge_action_config_reasoning_effort "$input_text"
+        case config-commit-model ccm
+            __forge_action_commit_model "$input_text"
+        case config-suggest-model csm
+            __forge_action_suggest_model "$input_text"
+        case tools t
+            __forge_action_tools
+        case config env e
+            __forge_action_config
+        case config-edit ce
+            __forge_action_config_edit
+        case skill
+            __forge_action_skill
+        case edit ed
+            # Replaces the command line via __forge_set_buffer
+            __forge_action_editor "$input_text"
+        case commit
+            __forge_action_commit "$input_text"
+        case commit-preview
+            # Replaces the command line via __forge_set_buffer
+            __forge_action_commit_preview "$input_text"
+        case suggest s
+            # Replaces the command line via __forge_set_buffer
+            __forge_action_suggest "$input_text"
+        case clone
+            __forge_action_clone "$input_text"
+        case rename rn
+            __forge_action_rename "$input_text"
+        case conversation-rename
+            __forge_action_conversation_rename "$input_text"
+        case copy
+            __forge_action_copy
+        case workspace-sync sync
+            __forge_action_sync
+        case workspace-init sync-init
+            __forge_action_sync_init
+        case workspace-status sync-status
+            __forge_action_sync_status
+        case workspace-info sync-info
+            __forge_action_sync_info
+        case provider-login login provider
+            __forge_action_login "$input_text"
+        case logout
+            __forge_action_logout "$input_text"
         case '*'
             __forge_action_default "$user_action" "$input_text"
     end
