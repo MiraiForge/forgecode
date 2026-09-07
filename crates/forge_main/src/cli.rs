@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use forge_domain::{AgentId, ConversationId, Effort, ModelId, ProviderId};
 
+use crate::shell::Shell;
+
 #[derive(Parser)]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 pub struct Cli {
@@ -148,12 +150,23 @@ pub enum TopLevelCommand {
     /// Update forge to the latest version.
     Update(UpdateArgs),
 
-    /// Setup zsh integration by updating .zshrc with plugin and theme (alias
-    /// for `zsh setup`).
-    Setup,
+    /// Setup shell integration (plugin and theme) for zsh or fish.
+    ///
+    /// Defaults to the login shell from `$SHELL`, falling back to zsh.
+    Setup {
+        /// Shell to configure (defaults to the login shell).
+        #[arg(long, value_enum)]
+        shell: Option<Shell>,
+    },
 
-    /// Run diagnostics on shell environment (alias for `zsh doctor`).
-    Doctor,
+    /// Run diagnostics on the shell environment for zsh or fish.
+    ///
+    /// Defaults to the login shell from `$SHELL`, falling back to zsh.
+    Doctor {
+        /// Shell to diagnose (defaults to the login shell).
+        #[arg(long, value_enum)]
+        shell: Option<Shell>,
+    },
 
     /// Stream forge log output (defaults to the most recent log file).
     Logs(LogsArgs),
@@ -1968,15 +1981,37 @@ mod tests {
     #[test]
     fn test_setup_alias() {
         let fixture = Cli::parse_from(["forge", "setup"]);
-        let actual = matches!(fixture.subcommands, Some(TopLevelCommand::Setup));
+        let actual = matches!(fixture.subcommands, Some(TopLevelCommand::Setup { shell: None }));
         assert_eq!(actual, true);
     }
 
     #[test]
     fn test_doctor_alias() {
         let fixture = Cli::parse_from(["forge", "doctor"]);
-        let actual = matches!(fixture.subcommands, Some(TopLevelCommand::Doctor));
+        let actual = matches!(fixture.subcommands, Some(TopLevelCommand::Doctor { shell: None }));
         assert_eq!(actual, true);
+    }
+
+    #[test]
+    fn test_setup_with_shell_flag() {
+        let fixture = Cli::parse_from(["forge", "setup", "--shell", "fish"]);
+        let actual = matches!(
+            fixture.subcommands,
+            Some(TopLevelCommand::Setup { shell: Some(Shell::Fish) })
+        );
+        let expected = true;
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_doctor_with_shell_flag() {
+        let fixture = Cli::parse_from(["forge", "doctor", "--shell", "zsh"]);
+        let actual = matches!(
+            fixture.subcommands,
+            Some(TopLevelCommand::Doctor { shell: Some(Shell::Zsh) })
+        );
+        let expected = true;
+        assert_eq!(actual, expected);
     }
 
     #[test]

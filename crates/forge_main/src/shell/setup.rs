@@ -109,12 +109,12 @@ pub(super) fn run_script(shell: Shell, script_content: &str, script_name: &str) 
     //
     // On Windows, we write the script to a temp file and run `zsh -f <file>`
     // instead. A temp file is necessary because:
-    //   1. CI has core.autocrlf=true, so checked-out files contain CRLF; writing
-    //      through normalize_script ensures the temp file has LF.
-    //   2. CreateProcess mangles quotes, so passing the script via -c corrupts any
-    //      embedded quoting.
-    //   3. Piping via stdin is unreliable -- Windows caps pipe buffer size, which
-    //      can truncate or block on larger scripts.
+    //   1. CI has core.autocrlf=true, so checked-out files contain CRLF;
+    //      writing through normalize_script ensures the temp file has LF.
+    //   2. CreateProcess mangles quotes, so passing the script via -c corrupts
+    //      any embedded quoting.
+    //   3. Piping via stdin is unreliable -- Windows caps pipe buffer size,
+    //      which can truncate or block on larger scripts.
     // The -f flag also prevents ~/.zshrc from loading during execution.
     // Fish has no native Windows build, so only zsh takes this path.
     let (_temp_dir, mut child) = if cfg!(windows) {
